@@ -45,16 +45,19 @@ class AionPlannerAgent(AionAgent):
         then each step is executed as a child workflow.
 
         Args:
-            task: User goal string (will be pre-processed by policies if set).
+            task: User goal string (pre-processed by policies if set).
 
         Returns:
             Hatchet event/run identifier.
         """
+        scrubbed = task
+        for policy in self.policies:
+            scrubbed = policy.pre_process(scrubbed)
         payload = {
             "agent_name": self.name,
             "model": self.model,
             "system_prompt": self.system_prompt,
-            "task": task,
+            "task": scrubbed,
             "policy_names": getattr(self, "_policy_names", []),
         }
         print("📡 [Aion Planner] Dispatching plan-and-execute to Hatchet...")

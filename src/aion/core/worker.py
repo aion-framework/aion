@@ -248,7 +248,7 @@ def _run_planner_llm(goal: str, model: str, system_prompt: str) -> list[str]:
             system_prompt
             or "You are a planner. Break the user goal into a short ordered list of concrete steps. Output only a JSON object with a single key 'steps' (array of strings)."
         ),
-        result_type=PlanSchema,
+        output_type=PlanSchema,
     )
     result = planner_agent.run_sync(
         f"Goal: {goal}. Output a JSON object with key 'steps' (array of step strings)."

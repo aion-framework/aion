@@ -67,7 +67,7 @@ class MetaMemory:
         self._db = lancedb.connect(db_path)
         self._table_name = "mistakes"
 
-        if self._table_name not in self._db.table_names():
+        if self._table_name not in self._db.list_tables().tables:
             self._table = self._db.create_table(
                 self._table_name,
                 schema=MistakeRecord,
