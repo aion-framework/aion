@@ -10,7 +10,7 @@ Real-world examples built on the Aion Framework. Use these **after** you have [p
    ```
 2. In another terminal, from the **project root**, run the use case script, for example:
    ```bash
-   python examples/use-cases/report-generator/run.py
+   python examples/use-cases/agentic-app-quickstart/run.py
    ```
 
 Each use case folder contains:
@@ -22,6 +22,7 @@ Each use case folder contains:
 
 | Use case | Description |
 |----------|-------------|
+| [agentic-app-quickstart](agentic-app-quickstart/) | **Build your first agentic app** – minimal pattern: worker tools + app that dispatches tasks. |
 | [report-generator](report-generator/) | Pull metrics, events, and data sources; produce a one-page briefing with summary and recommendations. |
 
 ## Adding a use case

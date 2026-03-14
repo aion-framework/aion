@@ -83,8 +83,6 @@ cd /path/to/aion && source .venv/bin/activate && aion worker
 cd /path/to/aion && source .venv/bin/activate && python examples/demo.py
 ```
 
-## Prove V1.0.0 works
-
 Do these two checks before building on the framework or trying [use cases](#use-cases).
 
 ### 1. End-to-end run
@@ -235,13 +233,45 @@ Run `python examples/demo_enterprise.py` to see PII scrubbing, planning, and HIT
 
 Run `python examples/demo_observability.py` then view traces in Arize Phoenix (`docker run -p 6006:6006 -p 4317:4317 arizeai/phoenix`).
 
+## Building agentic apps on Aion
+
+Can you build things like **OpenClaw**, **Moltbot**, **Clawdbot**, or other agentic apps (coding agents, CLI bots, DB assistants) **quickly** on this framework? Yes, with one important constraint.
+
+### What you get out of the box
+
+- **Durable execution** – Tasks run in the Hatchet worker; restarts and retries don’t lose work.
+- **Agent + tools** – One event push (`agent.start(task)`) runs the LLM and tools in the worker.
+- **Optional extras** – Meta-Memory (learn from failures), HITL (pause for approval), Planner (plan then execute), policies (PII/toxicity), OTEL tracing.
+
+So you get a production-style **backend**: durable, observable, and with guardrails if you need them.
+
+### The one constraint: tools live in the worker
+
+Today, **tools are defined in the worker** (`src/aion/core/worker.py`), not in the client. The client sends only **task**, **model**, and **system_prompt**. So to build *your* agentic app you either:
+
+1. **Extend the worker** – Add your domain tools (e.g. `read_file`, `run_shell`, `query_db`) in the worker’s tool list and wire them to your APIs/DBs, or  
+2. **Add a custom workflow** – Register another Hatchet workflow (like the planner) that has its own tools and event, and dispatch to that from your app.
+
+Both are straightforward: same pattern as the [report-generator](examples/use-cases/report-generator/) use case (worker has the tools; client sends the task and prompt).
+
+### Quick-build path
+
+1. **Prove V1.0.0** – Run [Prove V1.0.0 works](#prove-v100-works) so the stack is working.
+2. **Try the minimal example** – Run the [Agentic app quickstart](examples/use-cases/agentic-app-quickstart/) use case: worker tools (`get_app_context`, `save_note`) + a script that dispatches a task. That’s the same pattern you’ll use for your app.
+3. **Add your tools** – In the worker (or a new workflow), implement tools your agent needs (file system, shell, DB, APIs, RAG, etc.).
+4. **Define your agent** – In your app, create an `AionAgent` with the right `system_prompt` (and optionally policies); call `agent.start(task)` to dispatch.
+5. **Expose an interface** – Add a thin API (FastAPI/Flask) or CLI that calls `agent.start(...)` and, if needed, polls Hatchet or a store for the result. Optionally add a simple UI (chat or dashboard).
+
+So: **durability, retries, and worker-side execution are already there**; you add **domain tools in the worker** and a **client/API/UI** that dispatches tasks and consumes results. That’s the fastest path to an OpenClaw/Moltbot/Clawdbot-style app today. Future versions may support passing or registering custom tools without editing the core worker.
+
 ## Use cases
 
 | Use case | Description | Run |
 |----------|-------------|-----|
+| [Agentic app quickstart](examples/use-cases/agentic-app-quickstart/) | **Minimal pattern to build an agentic app:** worker tools (`get_app_context`, `save_note`) + app that dispatches tasks. Start here to build your own app. | See `examples/use-cases/agentic-app-quickstart/README.md` |
 | [Report generator](examples/use-cases/report-generator/) | Pull metrics, events, and data sources; produce a one-page briefing with summary and top 3 recommendations (multiple tools, durable). | See `examples/use-cases/report-generator/README.md` |
 
-Run the worker from the project root (`aion worker`), then from the project root run the use case script (e.g. `python examples/use-cases/report-generator/run.py`). Add your own use cases in the same directory and list them here.
+Run the worker from the project root (`aion worker`), then from the project root run the use case script (e.g. `python examples/use-cases/agentic-app-quickstart/run.py`). Add your own use cases in the same directory and list them here.
 
 ## Tests
 

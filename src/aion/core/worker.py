@@ -108,6 +108,17 @@ def get_available_sources() -> str:
     """
 
 
+def get_app_context() -> str:
+    """Return current app context (mock). Used by agentic-app-quickstart use case."""
+    return "App context: user=guest, theme=light, locale=en."
+
+
+def save_note(content: str) -> str:
+    """Save a note and return confirmation (mock). Used by agentic-app-quickstart use case."""
+    preview = (content[:50] + "…") if len(content) > 50 else content
+    return f"Note saved: {preview!r}"
+
+
 def _fetch_url_content(url: str) -> str:
     """Fetch raw text from URL (mock)."""
     return f"[Mock content from {url}]"
@@ -174,6 +185,8 @@ def execute_agent(workflow_input: Any, context: Context) -> dict[str, Any]:
         _wrap_tool(get_metrics_snapshot),
         _wrap_tool(get_recent_events),
         _wrap_tool(get_available_sources),
+        _wrap_tool(get_app_context),
+        _wrap_tool(save_note),
         _wrap_tool(_transfer_funds),
         _wrap_tool(_find_lead_info),
         _wrap_tool(_draft_outreach),
