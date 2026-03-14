@@ -4,25 +4,89 @@ The Durable Application Framework for Agentic AI (v1.0.0).
 
 ## Requirements
 
-- Python 3.10+
-- Docker & Docker Compose (for Hatchet)
+- **Python 3.10+** (3.9 is not supported; the codebase and `hatchet-sdk` use 3.10+ syntax.)
+- **Docker & Docker Compose** – used to run Hatchet (Postgres, RabbitMQ, Hatchet Engine, Dashboard).
+- **OpenAI API key** – for the agent and optional Meta-Memory/ExceptionAnalyzer.
 
-## Setup
+## Initial setup
+
+Follow these steps once to get the environment running.
+
+### 1. Clone and create a virtual environment
 
 ```bash
-# Copy env and set your keys
-cp .env.example .env   # then edit OPENAI_API_KEY and HATCHET_CLIENT_TOKEN
-
-# Install the package
+git clone https://github.com/aion-framework/aion.git
+cd aion
+python3.10 -m venv .venv   # or python3.11 -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -e .
+```
 
-# Start Hatchet (Postgres, RabbitMQ, Hatchet Engine)
+### 2. Start Hatchet with Docker
+
+```bash
 docker-compose up -d
+```
+
+Wait until all services are healthy (Postgres, RabbitMQ, migration, setup-config, hatchet-engine, hatchet-dashboard). You can check with `docker-compose ps`.
+
+### 3. Get the Hatchet client token
+
+The worker needs a **HATCHET_CLIENT_TOKEN** to connect to the local engine.
+
+1. Open **http://localhost:8080** in your browser (Hatchet Dashboard).
+2. Log in with **admin@example.com** / **Admin123!!**
+3. Go to **Settings → API Tokens → Create API Token**.
+4. Copy the token (you will paste it into `.env`).
+
+### 4. Configure environment variables
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and set:
+
+| Variable | Description |
+|----------|-------------|
+| `OPENAI_API_KEY` | Your OpenAI API key (starts with `sk-`). Required for the agent and for Meta-Memory/ExceptionAnalyzer. |
+| `HATCHET_CLIENT_TOKEN` | The token from the Hatchet Dashboard (step 3). |
+| `HATCHET_CLIENT_TLS_STRATEGY` | Use `none` for local development. |
+| `HATCHET_CLIENT_HOST_PORT` | Use `localhost:7077` for local Docker engine. |
+
+Example `.env`:
+
+```env
+OPENAI_API_KEY=sk-proj-...
+HATCHET_CLIENT_TOKEN=your-token-from-dashboard
+HATCHET_CLIENT_TLS_STRATEGY=none
+HATCHET_CLIENT_HOST_PORT=localhost:7077
+```
+
+### 5. Run the worker from the project root
+
+The worker loads `.env` from the **current working directory**. Always start it from the repo root:
+
+```bash
+cd /path/to/aion
+source .venv/bin/activate
+aion worker
+```
+
+## Quick start (after setup)
+
+```bash
+# Terminal 1 – start the worker (must run from project root so .env is loaded)
+cd /path/to/aion && source .venv/bin/activate && aion worker
+
+# Terminal 2 – dispatch a task
+cd /path/to/aion && source .venv/bin/activate && python examples/demo.py
 ```
 
 ## Usage
 
-**Terminal 1 – start the worker (runs the agent durably):**
+**Terminal 1 – start the worker (runs the agent durably):**  
+Run from the **project root** so `.env` is loaded (see [Initial setup](#initial-setup)).
 
 ```bash
 aion worker
@@ -41,6 +105,76 @@ python examples/demo_observability.py
 # or after: aion init
 python demo.py
 ```
+
+## Troubleshooting
+
+Common issues and how to fix them.
+
+### "OPENAI_API_KEY environment variable" / "api_key client option must be set"
+
+**Cause:** The worker process does not see `OPENAI_API_KEY` (e.g. you didn’t set it in `.env` or the worker wasn’t started from the project root).
+
+**Fix:**
+
+1. Create or edit `.env` in the **project root** with a valid `OPENAI_API_KEY=sk-...`.
+2. Start the worker from that directory: `cd /path/to/aion && aion worker`. The CLI loads `.env` from the current working directory.
+3. If you use a different cwd, export the key in the shell before starting the worker: `export OPENAI_API_KEY=sk-...`.
+
+### "Incorrect API key provided" / 401 authentication error
+
+**Cause:** The key in `.env` is invalid, expired, or still the placeholder (`sk-your-openai-api-key`).
+
+**What you’ll see:** The worker logs:  
+`❌ [Aion Worker] OpenAI authentication failed. Set a valid OPENAI_API_KEY in .env or your environment.`  
+The step completes without a traceback (auth failures are handled gracefully).
+
+**Fix:**
+
+1. Get a key from https://platform.openai.com/account/api-keys.
+2. Put it in `.env`: `OPENAI_API_KEY=sk-proj-...` (no quotes, no spaces).
+3. Restart the worker.
+
+### Worker doesn’t connect to Hatchet / gRPC or connection errors
+
+**Cause:** Wrong host/port or TLS settings for the local engine.
+
+**Fix:**
+
+1. Ensure Docker is running and Hatchet is up: `docker-compose ps`. You should see `hatchet-engine` and related services running.
+2. In `.env` set:
+   - `HATCHET_CLIENT_TLS_STRATEGY=none`
+   - `HATCHET_CLIENT_HOST_PORT=localhost:7077`
+3. Ensure `HATCHET_CLIENT_TOKEN` is the token from the Hatchet Dashboard (http://localhost:8080 → Settings → API Tokens), not a placeholder.
+
+### "Event ID" printed but nothing happens in the worker
+
+**Cause:** Worker isn’t running, or it’s not connected to the same Hatchet instance (e.g. wrong token or port).
+
+**Fix:**
+
+1. Start the worker first: `aion worker` (from project root).
+2. Confirm you see: `'aion-worker' waiting for ['aionworkflow:execute_agent', ...]` and `acquired action listener`.
+3. Then run `python examples/demo.py`. If the worker is connected, you’ll see `🚀 [Aion Worker] Executing task: ...`.
+
+### Python 3.9 or "unsupported syntax" errors
+
+**Cause:** This project and `hatchet-sdk` require Python 3.10+ (e.g. `X | None` type hints).
+
+**Fix:** Use Python 3.10 or 3.11: `python3.10 -m venv .venv` (or install Python 3.10/3.11 via your OS package manager or pyenv).
+
+### gRPC message: "Other threads are currently calling into gRPC, skipping fork() handlers"
+
+**Cause:** Normal gRPC/runtime message when the worker process uses threading. It is harmless and can be ignored.
+
+### Dashboard or engine not reachable after `docker-compose up -d`
+
+**Cause:** Services may still be starting (migration, setup-config run after Postgres/RabbitMQ).
+
+**Fix:** Wait 30–60 seconds and check again. Run `docker-compose logs hatchet-engine` or `docker-compose logs hatchet-dashboard` for errors. Ensure ports 7077 (engine) and 8080 (dashboard) are not in use by another process.
+
+---
+
+For more detail on the worker (task signatures, event API, auth handling), see the source: `src/aion/core/worker.py`, `src/aion/core/engine.py`, and `src/aion/cli.py`.
 
 ## Durability test (Milestone 1.2)
 
