@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: hatchet
+      POSTGRES_PASSWORD: hatchetpassword
+      POSTGRES_DB: hatchet
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hatchet"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.11-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: hatchet
+      RABBITMQ_DEFAULT_PASS: hatchetpassword
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  hatchet-engine:
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-engine:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgres://hatchet:hatchetpassword@postgres:5432/hatchet?sslmode=disable"
+      RABBITMQ_URL: "amqp://hatchet:hatchetpassword@rabbitmq:5672/"
+      SERVER_TLS_CERT_FILE: ""
+      SERVER_TLS_KEY_FILE: ""
+    ports:
+      - "7077:7077"
+      - "8080:8080"

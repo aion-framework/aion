@@ -1,0 +1,33 @@
+# Build / install
+*.egg-info/
+*.egg
+build/
+dist/
+eggs/
+.eggs/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Environment
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Data
+.aion_data/
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
