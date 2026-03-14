@@ -11,6 +11,8 @@ import traceback
 from typing import TYPE_CHECKING
 
 from openai import OpenAI
+from openai import AuthenticationError as OpenAIAuthError
+from openai import APIStatusError
 
 if TYPE_CHECKING:
     from aion.memory.store import MetaMemory
@@ -49,21 +51,36 @@ class ExceptionAnalyzer:
             exception: The exception that was raised.
         """
         error_trace = traceback.format_exc()
-        prompt = _CORRECTION_PROMPT.format(
-            task_context=task_context,
-            error_trace=error_trace,
-        )
-        resp = self._client.chat.completions.create(
-            model=self._model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=150,
-        )
-        correction_advice = (resp.choices[0].message.content or "").strip()
-        if not correction_advice:
+        correction_advice: str
+        try:
+            prompt = _CORRECTION_PROMPT.format(
+                task_context=task_context,
+                error_trace=error_trace,
+            )
+            resp = self._client.chat.completions.create(
+                model=self._model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=150,
+            )
+            correction_advice = (resp.choices[0].message.content or "").strip()
+            if not correction_advice:
+                correction_advice = f"Avoid the action that caused: {exception!s}"
+        except (OpenAIAuthError, APIStatusError) as api_err:
+            # Don't fail analysis when API key is invalid or API is unavailable
+            correction_advice = (
+                "Check API key and configuration."
+                if isinstance(api_err, OpenAIAuthError)
+                else f"API error during analysis: {api_err!s}"
+            )
+        except Exception:
             correction_advice = f"Avoid the action that caused: {exception!s}"
 
-        self._memory.save_mistake(
-            task_context=task_context,
-            error_trace=error_trace,
-            correction_advice=correction_advice,
-        )
+        try:
+            self._memory.save_mistake(
+                task_context=task_context,
+                error_trace=error_trace,
+                correction_advice=correction_advice,
+            )
+        except (OpenAIAuthError, APIStatusError):
+            # MetaMemory uses embeddings API; skip persist when auth/API fails
+            pass

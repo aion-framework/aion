@@ -12,7 +12,9 @@ import asyncio
 from typing import Any
 
 from hatchet_sdk import Context
+from openai import AuthenticationError as OpenAIAuthError
 from pydantic_ai import Agent
+from pydantic_ai.exceptions import ModelHTTPError
 
 from .context import AionContext, _current_aion_context
 from .engine import AionWorkflow, get_hatchet
@@ -95,69 +97,94 @@ def _apply_post_process(raw: str, policy_names: list[str]) -> str:
     return out
 
 
-@hatchet.workflow(name=AionWorkflow.WORKFLOW_NAME, on_events=[AionWorkflow.TRIGGER_EVENT])
-class AionWorkflowImpl:
-    """
-    Hatchet workflow that runs the agent step. Pre-hook: Meta-Memory;
-    post-hook: exception analyzer and output policies.
-    """
+def _workflow_input_to_dict(workflow_input: Any) -> dict[str, Any]:
+    """Normalize workflow input to dict; Hatchet may pass a Pydantic EmptyModel when no input_validator is set."""
+    if isinstance(workflow_input, dict):
+        return workflow_input
+    if hasattr(workflow_input, "model_dump"):
+        return workflow_input.model_dump()
+    if hasattr(workflow_input, "dict"):
+        return workflow_input.dict()
+    return dict(workflow_input) if workflow_input is not None else {}
 
-    @hatchet.step(name="execute_agent", retries=3)
-    @aion_trace("AgentExecution")
-    def execute_agent(self, context: Context) -> dict[str, Any]:
-        from aion.memory.store import MetaMemory
 
-        payload = context.workflow_input()
-        task = payload.get("task", "")
-        model = payload.get("model", "openai:gpt-4o-mini")
-        system_prompt = payload.get("system_prompt", "You are a helpful AI.")
-        policy_names = payload.get("policy_names") or []
+# Workflow object (use .task(), not hatchet.step)
+aion_workflow = hatchet.workflow(
+    name=AionWorkflow.WORKFLOW_NAME,
+    on_events=[AionWorkflow.TRIGGER_EVENT],
+)
 
-        meta_memory = MetaMemory()
-        warnings = meta_memory.get_warnings_for_task(task, limit=2)
-        if warnings:
-            block = "WARNING - PAST FAILURES TO AVOID:\n"
-            block += "\n".join(f"- {w}" for w in warnings)
-            system_prompt = f"{system_prompt}\n\n{block}"
-            print(f"🧠 [Memory] Injected {len(warnings)} past failure warning(s) into prompt.")
 
-        def _wrap_tool(fn: Any) -> Any:
-            try:
-                return aion_trace(f"ToolCall:{fn.__name__}")(fn)
-            except Exception:
-                return fn
-        tools: list[Any] = [
-            _wrap_tool(_fetch_data),
-            _wrap_tool(_fetch_user_data),
-            _wrap_tool(_transfer_funds),
-            _wrap_tool(_find_lead_info),
-            _wrap_tool(_draft_outreach),
-            _wrap_tool(_send_email),
-            _wrap_tool(_fetch_url_content),
-            _wrap_tool(_extract_structured_data),
-        ]
-        agent = Agent(
-            model,
-            system_prompt=system_prompt or "You are a helpful AI.",
-            tools=tools,
-        )
+@aion_workflow.task(name="execute_agent", retries=3)
+@aion_trace("AgentExecution")
+def execute_agent(workflow_input: Any, context: Context) -> dict[str, Any]:
+    """Run the agent; Meta-Memory pre-hook, exception analyzer post-hook."""
+    from aion.memory.store import MetaMemory
 
-        # Set context for HITL (tools can call get_aion_context().suspend_for_approval)
-        token = _current_aion_context.set(AionContext(context))
+    payload = _workflow_input_to_dict(workflow_input)
+    task = payload.get("task", "")
+    model = payload.get("model", "openai:gpt-4o-mini")
+    system_prompt = payload.get("system_prompt", "You are a helpful AI.")
+    policy_names = payload.get("policy_names") or []
+
+    meta_memory = MetaMemory()
+    warnings = meta_memory.get_warnings_for_task(task, limit=2)
+    if warnings:
+        block = "WARNING - PAST FAILURES TO AVOID:\n"
+        block += "\n".join(f"- {w}" for w in warnings)
+        system_prompt = f"{system_prompt}\n\n{block}"
+        print(f"🧠 [Memory] Injected {len(warnings)} past failure warning(s) into prompt.")
+
+    def _wrap_tool(fn: Any) -> Any:
         try:
-            print(f"🚀 [Aion Worker] Executing task: {task}")
-            result = agent.run_sync(task)
-            output = result.output
-            output = _apply_post_process(str(output), policy_names)
-            print("✅ [Aion Worker] Task completed.")
-            return {"result": output}
-        except Exception as e:
-            analyzer = ExceptionAnalyzer()
-            asyncio.run(analyzer.analyze_and_store(task_context=task, exception=e))
-            print("❌ [Aion Worker] Task failed; stored in MetaMemory and re-raising for retry.")
-            raise e
-        finally:
-            _current_aion_context.reset(token)
+            return aion_trace(f"ToolCall:{fn.__name__}")(fn)
+        except Exception:
+            return fn
+    tools: list[Any] = [
+        _wrap_tool(_fetch_data),
+        _wrap_tool(_fetch_user_data),
+        _wrap_tool(_transfer_funds),
+        _wrap_tool(_find_lead_info),
+        _wrap_tool(_draft_outreach),
+        _wrap_tool(_send_email),
+        _wrap_tool(_fetch_url_content),
+        _wrap_tool(_extract_structured_data),
+    ]
+    agent = Agent(
+        model,
+        system_prompt=system_prompt or "You are a helpful AI.",
+        tools=tools,
+    )
+
+    token = _current_aion_context.set(AionContext(context))
+    try:
+        print(f"🚀 [Aion Worker] Executing task: {task}")
+        result = agent.run_sync(task)
+        output = result.output
+        output = _apply_post_process(str(output), policy_names)
+        print("✅ [Aion Worker] Task completed.")
+        return {"result": output}
+    except (OpenAIAuthError, ModelHTTPError) as e:
+        is_auth = isinstance(e, OpenAIAuthError) or (
+            isinstance(e, ModelHTTPError) and getattr(e, "status_code", None) == 401
+        )
+        if is_auth:
+            msg = "OpenAI authentication failed. Set a valid OPENAI_API_KEY in .env or your environment."
+            print(f"❌ [Aion Worker] {msg}")
+            # Return instead of raise so Hatchet marks the step completed (no traceback, no retries)
+            return {"result": None, "error": msg}
+        raise
+    except Exception as e:
+        analyzer = ExceptionAnalyzer()
+        asyncio.run(analyzer.analyze_and_store(task_context=task, exception=e))
+        print("❌ [Aion Worker] Task failed; stored in MetaMemory and re-raising for retry.")
+        raise e
+    finally:
+        _current_aion_context.reset(token)
+
+
+# Alias for CLI registration (register_workflow expects a workflow object)
+AionWorkflowImpl = aion_workflow
 
 
 # --- Planner workflow: plan step + execute step (spawn child workflows) ---
@@ -185,40 +212,42 @@ def _run_planner_llm(goal: str, model: str, system_prompt: str) -> list[str]:
     return result.output.steps
 
 
-@hatchet.workflow(name="AionPlannerWorkflow", on_events=[PLANNER_EVENT])
-class AionPlannerWorkflowImpl:
-    """Plan-and-execute: plan step then spawn child workflow per step."""
+planner_workflow = hatchet.workflow(name="AionPlannerWorkflow", on_events=[PLANNER_EVENT])
 
-    @hatchet.step(name="plan", retries=2)
-    def plan_step(self, context: Context) -> dict[str, Any]:
-        payload = context.workflow_input()
-        goal = payload.get("task", "")
-        model = payload.get("model", "openai:gpt-4o-mini")
-        system_prompt = payload.get("system_prompt", "")
-        steps = _run_planner_llm(goal, model, system_prompt)
-        return {"steps": steps, "model": model, "system_prompt": system_prompt, "policy_names": payload.get("policy_names") or []}
 
-    @hatchet.step(name="execute_plan", parents=["plan"], retries=1)
-    def execute_plan(self, context: Context) -> dict[str, Any]:
-        plan_output = context.step_output("plan")
-        steps = plan_output.get("steps") or []
-        model = plan_output.get("model", "openai:gpt-4o-mini")
-        system_prompt = plan_output.get("system_prompt", "")
-        policy_names = plan_output.get("policy_names") or []
-        # Execute each step with the same agent (in-process; child workflow would use wf.aio_run)
-        all_tools: list[Any] = [
-            _fetch_data, _fetch_user_data, _transfer_funds,
-            _find_lead_info, _draft_outreach, _send_email,
-            _fetch_url_content, _extract_structured_data,
-        ]
-        agent = Agent(model, system_prompt=system_prompt or "You are a helpful AI.", tools=all_tools)
-        results = []
-        for step in steps:
-            token = _current_aion_context.set(AionContext(context))
-            try:
-                result = agent.run_sync(step)
-                out = _apply_post_process(str(result.output), policy_names)
-                results.append(out)
-            finally:
-                _current_aion_context.reset(token)
-        return {"results": results}
+@planner_workflow.task(name="plan", retries=2)
+def plan_step(workflow_input: Any, context: Context) -> dict[str, Any]:
+    payload = _workflow_input_to_dict(workflow_input)
+    goal = payload.get("task", "")
+    model = payload.get("model", "openai:gpt-4o-mini")
+    system_prompt = payload.get("system_prompt", "")
+    steps = _run_planner_llm(goal, model, system_prompt)
+    return {"steps": steps, "model": model, "system_prompt": system_prompt, "policy_names": payload.get("policy_names") or []}
+
+
+@planner_workflow.task(name="execute_plan", parents=[plan_step], retries=1)
+def execute_plan(workflow_input: Any, context: Context) -> dict[str, Any]:
+    plan_output = context.step_output("plan")
+    steps = plan_output.get("steps") or []
+    model = plan_output.get("model", "openai:gpt-4o-mini")
+    system_prompt = plan_output.get("system_prompt", "")
+    policy_names = plan_output.get("policy_names") or []
+    all_tools: list[Any] = [
+        _fetch_data, _fetch_user_data, _transfer_funds,
+        _find_lead_info, _draft_outreach, _send_email,
+        _fetch_url_content, _extract_structured_data,
+    ]
+    agent = Agent(model, system_prompt=system_prompt or "You are a helpful AI.", tools=all_tools)
+    results = []
+    for step in steps:
+        token = _current_aion_context.set(AionContext(context))
+        try:
+            result = agent.run_sync(step)
+            out = _apply_post_process(str(result.output), policy_names)
+            results.append(out)
+        finally:
+            _current_aion_context.reset(token)
+    return {"results": results}
+
+
+AionPlannerWorkflowImpl = planner_workflow

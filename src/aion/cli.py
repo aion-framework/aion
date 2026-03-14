@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 
 import typer
+from dotenv import load_dotenv
 
 from .core.engine import get_hatchet
 from .core.worker import AionPlannerWorkflowImpl, AionWorkflowImpl
@@ -70,11 +71,12 @@ HATCHET_CLIENT_TOKEN=your-local-hatchet-token
 @app.command()
 def worker() -> None:
     """Start the Hatchet worker to listen for agent tasks (durable execution)."""
+    load_dotenv()  # Load .env so OPENAI_API_KEY and HATCHET_* are available
     typer.echo("👷 Starting Aion Durable Worker...")
     hatchet = get_hatchet(debug=True)
     w = hatchet.worker("aion-worker")
-    w.register_workflow(AionWorkflowImpl())
-    w.register_workflow(AionPlannerWorkflowImpl())
+    w.register_workflow(AionWorkflowImpl)
+    w.register_workflow(AionPlannerWorkflowImpl)
     w.start()
 
 

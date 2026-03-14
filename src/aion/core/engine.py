@@ -48,7 +48,7 @@ def run_aion_workflow(payload: dict[str, Any]) -> str:
     """
     client = get_hatchet()
     # Event triggers the workflow registered as on_events=["aion:agent_task"]
-    event_id = client.client.event.push("aion:agent_task", payload)
+    event_id = client.event.push("aion:agent_task", payload)
     return event_id
 
 

@@ -24,7 +24,7 @@ class Plan(BaseModel):
 def run_planner_workflow(payload: dict[str, Any]) -> str:
     """Trigger the planner workflow (aion:planner_task)."""
     client = get_hatchet()
-    event_id = client.client.event.push("aion:planner_task", payload)
+    event_id = client.event.push("aion:planner_task", payload)
     return event_id
 
 
