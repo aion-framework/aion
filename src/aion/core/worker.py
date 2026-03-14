@@ -80,6 +80,34 @@ async def _send_email(to: str, subject: str, body: str) -> str:
     return f"Sent to {to}: {subject}"
 
 
+def get_metrics_snapshot() -> str:
+    """Return a snapshot of key metrics (mock). Used by report-generator use case."""
+    return """
+    Metrics snapshot (last 24h):
+    - API latency p99: 420ms (target <500ms)
+    - Throughput: 12.4k req/min
+    - Error rate: 0.02%
+    - Cache hit rate: 94%
+    """
+
+
+def get_recent_events(limit: int = 5) -> str:
+    """Return recent system events (mock). Used by report-generator use case."""
+    return """
+    Recent events:
+    1. Deployment: service-api v2.1.0 (success, 14:00 UTC)
+    2. Alert: disk usage >85% on node-3 (resolved)
+    3. Config change: feature flag 'new_checkout' enabled for 10% traffic
+    """
+
+
+def get_available_sources() -> str:
+    """Return list of available data sources (mock). Used by report-generator use case."""
+    return """
+    Available sources: metrics_db, events_log, audit_trail, config_store.
+    """
+
+
 def _fetch_url_content(url: str) -> str:
     """Fetch raw text from URL (mock)."""
     return f"[Mock content from {url}]"
@@ -143,6 +171,9 @@ def execute_agent(workflow_input: Any, context: Context) -> dict[str, Any]:
     tools: list[Any] = [
         _wrap_tool(_fetch_data),
         _wrap_tool(_fetch_user_data),
+        _wrap_tool(get_metrics_snapshot),
+        _wrap_tool(get_recent_events),
+        _wrap_tool(get_available_sources),
         _wrap_tool(_transfer_funds),
         _wrap_tool(_find_lead_info),
         _wrap_tool(_draft_outreach),

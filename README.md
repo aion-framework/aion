@@ -83,6 +83,35 @@ cd /path/to/aion && source .venv/bin/activate && aion worker
 cd /path/to/aion && source .venv/bin/activate && python examples/demo.py
 ```
 
+## Prove V1.0.0 works
+
+Do these two checks before building on the framework or trying [use cases](#use-cases).
+
+### 1. End-to-end run
+
+With a **valid `OPENAI_API_KEY`** in `.env` and the worker running from the project root:
+
+- **Terminal 1:** `aion worker`
+- **Terminal 2:** `python examples/demo.py`
+
+You should see:
+
+- Terminal 2: `✅ Dispatched! Event ID: ...`
+- Terminal 1: `🚀 [Aion Worker] Executing task: Fetch the latest data and summarize it.` then `✅ [Aion Worker] Task completed.`
+
+The agent calls the tool, gets data, and returns a summary. That confirms the full path (client → Hatchet → worker → OpenAI → result) works.
+
+### 2. Durability (resume after worker kill)
+
+Same setup (worker + demo). Then:
+
+1. Run `python examples/demo.py` again so a task is in the queue or running.
+2. While the worker is processing (or right after you dispatch), press **Ctrl+C** in the worker terminal to kill it.
+3. Start the worker again: `aion worker`.
+4. Hatchet should resume the same run and complete it (you’ll see the task finish in the restarted worker).
+
+Once both steps succeed, V1.0.0 is proven. You can then run the [demos](#usage) (Meta-Memory, Enterprise, Observability) and the [use cases](#use-cases) below.
+
 ## Usage
 
 **Terminal 1 – start the worker (runs the agent durably):**  
@@ -205,6 +234,14 @@ Run `python examples/demo_enterprise.py` to see PII scrubbing, planning, and HIT
 - **Patterns:** `DurableWebScraper`, `DurableSDR` in `aion.patterns`.
 
 Run `python examples/demo_observability.py` then view traces in Arize Phoenix (`docker run -p 6006:6006 -p 4317:4317 arizeai/phoenix`).
+
+## Use cases
+
+| Use case | Description | Run |
+|----------|-------------|-----|
+| [Report generator](examples/use-cases/report-generator/) | Pull metrics, events, and data sources; produce a one-page briefing with summary and top 3 recommendations (multiple tools, durable). | See `examples/use-cases/report-generator/README.md` |
+
+Run the worker from the project root (`aion worker`), then from the project root run the use case script (e.g. `python examples/use-cases/report-generator/run.py`). Add your own use cases in the same directory and list them here.
 
 ## Tests
 
